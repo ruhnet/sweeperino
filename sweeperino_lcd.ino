@@ -6,17 +6,19 @@
 #include <LiquidCrystal.h>
 #include <Rotary.h>
 
+/* 
+//Use these 2 lines if you want to use a little OLED display.
+#include <ssd1306_tiny.h> 
+ssd1306_tiny display; 
+*/
+
+
 Rotary r = Rotary(3,2); // sets the pins the rotary encoder uses.  Must be interrupt pins.
 
-LiquidCrystal lcd(12, 11, 7,8,9,10);
+LiquidCrystal lcd(12,11, 7,8,9,10);
 
 long stepInterval = 1000;
 uint8_t buttonPressed = 1;
-
-
-/* #include <ssd1306_tiny.h> 
-
-ssd1306_tiny display; */
 
 Si5351 si5351;
 Si570 *si570=NULL;
@@ -24,10 +26,10 @@ Si570 *si570=NULL;
 char printBuff[20];
 
 #define LOG_AMP A3
-//#define WB_POWER_CALIBERATION (-112)
+//#define WB_POWER_CALIBERATION (-112) //Set your power calibration here
 #define WB_POWER_CALIBERATION (-92)
 #define BUTTON 4
-#define BUTTON2 5
+#define BUTTON2 5 //future use maybe
 
 int  dbm_reading = 100;
 int  mw_reading = 0;
@@ -54,7 +56,7 @@ void setup()
   PCMSK2 |= (1 << PCINT18) | (1 << PCINT19);
   sei();
 
-  pinMode(4,INPUT_PULLUP);
+  pinMode(BUTTON,INPUT_PULLUP); //set button input to pullup mode
 
   lcd.begin(16, 2);
   printBuff[0] = 0;
@@ -88,7 +90,7 @@ void setup()
      printLine2("Si570 ON");    
   }
 
-  setFrequency(14100000);
+  setFrequency(14100000); //14.1MHz initial frequency
   previous  = analogRead(TUNING)/2;
 }
 
@@ -282,6 +284,8 @@ void doTuning(){
   
 }
 
+
+//Main program loop:
 void loop(){
   if (Serial.available()>0)
     acceptCommand();   
@@ -291,7 +295,7 @@ void loop(){
     doTuning();
   }
   
-  buttonPressed = digitalRead(4);
+  buttonPressed = digitalRead(BUTTON);
   if (buttonPressed) {
     lcd.clear();
     lcd.setCursor(0,0);
@@ -306,7 +310,9 @@ void loop(){
 }
 
 
-ISR(PCINT2_vect) {
+//Interrupt processing.
+//This is probably kindof messy, but it works...
+ISR(PCINT2_vect) {  
   unsigned char result = r.process();
   if (result == DIR_NONE) {
     // do nothing
