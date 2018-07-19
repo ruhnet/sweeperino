@@ -1,10 +1,18 @@
+
 #include <Wire.h>
 #include <SPI.h>
 #include <Si570.h>
 #include <si5351.h>
 #include <LiquidCrystal.h>
+#include <Rotary.h>
 
-LiquidCrystal lcd(12, 11, 10, 9, 8, 7);
+Rotary r = Rotary(3,2); // sets the pins the rotary encoder uses.  Must be interrupt pins.
+
+LiquidCrystal lcd(12, 11, 7,8,9,10);
+
+long stepInterval = 1000;
+uint8_t buttonPressed = 1;
+
 
 /* #include <ssd1306_tiny.h> 
 
@@ -18,7 +26,11 @@ char printBuff[20];
 #define LOG_AMP A3
 //#define WB_POWER_CALIBERATION (-112)
 #define WB_POWER_CALIBERATION (-92)
+#define BUTTON 4
+#define BUTTON2 5
+
 int  dbm_reading = 100;
+int  mw_reading = 0;
 int power_caliberation = WB_POWER_CALIBERATION;
 
 
@@ -31,8 +43,57 @@ long frequency, fromFrequency=14150000, toFrequency=30000000, stepSize=100000;
 int tune, previous = 500;
 int count = 0;
 int  i, pulse;
-unsigned long baseTune = 14200000;
+unsigned long baseTune = 14100000;
 boolean sweepBusy = false;
+
+
+
+void setup()
+{  
+  PCICR |= (1 << PCIE2); //Setup Interrupt Handling
+  PCMSK2 |= (1 << PCINT18) | (1 << PCINT19);
+  sei();
+
+  pinMode(4,INPUT_PULLUP);
+
+  lcd.begin(16, 2);
+  printBuff[0] = 0;
+  printLine1("[RuhNet RF Labs]"); //Startup message
+  printLine2("Sweeperino v0.03");  
+  
+  delay(2000);
+
+  
+  // Start serial and initialize the Si5351
+  Serial.begin(9600);
+  analogReference(DEFAULT);
+
+  Serial.println("*Sweeperino v0.03\n");
+  Serial.println("*Testing for Si570\n");
+
+  si570 = new Si570(SI570_I2C_ADDRESS, 56320000);
+  if (si570->status == SI570_ERROR) {
+    printLine1("Si570 not found. ");
+    Serial.println("*Si570 Not found\n");   
+    si570 = NULL;
+    
+    Serial.println("*Si5350 ON");       
+    printLine2("Si5351 Enabled! ");   
+    si5351.init(SI5351_CRYSTAL_LOAD_8PF, 0, 0);
+    delay(1000);
+    lcd.clear();
+  }
+  else {
+    Serial.println("*Si570 ON");
+     printLine2("Si570 ON");    
+  }
+
+  setFrequency(14100000);
+  previous  = analogRead(TUNING)/2;
+}
+
+
+
 
 /* display routines */
 void printLine1(char *c){
@@ -87,7 +148,7 @@ void setFrequency(unsigned long f){
    if (si570 != NULL)
      si570->setFrequency(f);
    else
-     si5351.set_freq(f,  0, SI5351_CLK1); 
+     si5351.set_freq((f * 100), SI5351_CLK0); 
    frequency = f;
 }
 
@@ -99,7 +160,7 @@ void doSweep(){
   
   sweepBusy = 1;
   Serial.write("begin\n");
-  printLine1("Sweeping...");
+  printLine1("Sweeping...     ");
   for (x = fromFrequency; x < toFrequency; x = x + stepSize){
     setFrequency(x);
     delay(10);
@@ -108,7 +169,7 @@ void doSweep(){
     Serial.write(c);
   }
   Serial.write("end\n");
-//  si5351.set_freq(fromFrequency,  0, SI5351_CLK1);
+//  si5351.set_freq(fromFrequency,  0, SI5351_CLK0);
   sweepBusy = 0;
 }
 
@@ -181,38 +242,6 @@ void acceptCommand(){
   }
 }
 
-
-void setup()
-{  
-  lcd.begin(16, 2);
-  printBuff[0] = 0;
-  printLine1("Sweeperino v0.02");
-  // Start serial and initialize the Si5351
-  Serial.begin(9600);
-  analogReference(DEFAULT);
-
-  Serial.println("*Sweeperino v0.02\n");
-  Serial.println("*Testing for Si570\n");
-
-  si570 = new Si570(SI570_I2C_ADDRESS, 56320000);
-  if (si570->status == SI570_ERROR) {
-    printLine1("Si570 not found");
-    Serial.println("*Si570 Not found\n");   
-    si570 = NULL;
-    
-    Serial.println("*Si5350 ON");       
-    printLine2("Si5351 ON");    
-    delay(10);
-  }
-  else {
-    Serial.println("*Si570 ON");
-     printLine2("Si570 ON");    
-  }
-
-  setFrequency(14500000);
-  previous  = analogRead(TUNING)/2;
-}
-
 void updateDisplay(){
   int j;
 
@@ -220,7 +249,8 @@ void updateDisplay(){
   sprintf(c, "%.3s.%.3s.%3s ",  b, b+3, b+6);
   printLine1(c);  
 
-  sprintf(c,  "  %d.%d dbm  ", dbm_reading/10, abs(dbm_reading % 10));
+  //sprintf(c,  "%d.%d dBm ", dbm_reading/10, abs(dbm_reading % 10));
+  sprintf(c,  "%d.%d dBm %d.%dmW", dbm_reading/10, abs(dbm_reading % 10), mw_reading/10, abs(mw_reading % 10) );
   printLine2(c);
 }
 
@@ -228,74 +258,74 @@ void doReading(){
   int new_reading = analogRead(LOG_AMP) * 2 + (power_caliberation * 10);
   if (abs(new_reading - dbm_reading) > 4){
     dbm_reading = new_reading;
+	mw_reading = pow( 10.0, (dbm_reading) / 10.0);
+
     updateDisplay();
   }
 }
 
 void doTuning(){
-  tune = analogRead(TUNING);    
-
-  if (tune < 20){
-    count++;
-    if (count < 20){
-      baseTune -= 1000;
-      setFrequency(baseTune);
-      updateDisplay();                   
-      delay(100);
-    }
-    else if (count < 60) {
-      baseTune -= 10000;
-      setFrequency(baseTune);      
-      updateDisplay();                   
-      delay(100);
-    }
-    else {
-      baseTune -= 500000;    
-      setFrequency(baseTune);
-      updateDisplay();             
-      delay(500);
-    }
-    return;
-  }
+  setFrequency(baseTune);
+  updateDisplay();
   
-  if (tune > 1000){
-    count++;
-    if (count < 20){
-      baseTune += 1000;
-      setFrequency(baseTune + 100000);      
-      updateDisplay();                   
-      delay(100);
-    }
-    else if (count < 60) {
-      baseTune += 10000;
-      setFrequency(baseTune + 100000);      
-      updateDisplay();             
-      delay(100);
-    }
-    else {
-      baseTune += 500000;    
-      setFrequency(baseTune + 100000);      
-      updateDisplay();             
-      delay(500);
-    }
-    return;
-  }
+  
+/*
   
   count = 0;
   if (previous != tune){
-    setFrequency(baseTune + (100L * (unsigned long)(tune-20)));
+    setFrequency(baseTune + (10L * (unsigned long)(tune-20)));
     updateDisplay();
     previous = tune;
   }
+
+  */
+  
 }
 
 void loop(){
   if (Serial.available()>0)
-    acceptCommand();    
+    acceptCommand();   
+  
   if (!sweepBusy){
     doReading();
     doTuning();
   }
+  
+  buttonPressed = digitalRead(4);
+  if (buttonPressed) {
+    lcd.clear();
+    lcd.setCursor(0,0);
+    printLine1("Step Size:");
+    lcd.setCursor(0,1);
+   
+    lcd.print(stepInterval, DEC);
+    lcd.print(" Hz");
+  }
+
   delay(100);
+}
+
+
+ISR(PCINT2_vect) {
+  unsigned char result = r.process();
+  if (result == DIR_NONE) {
+    // do nothing
+  } else if (buttonPressed) {
+    if (result == DIR_CW) {
+      if (stepInterval < 1000000) {
+        stepInterval = stepInterval*10;
+      } else stepInterval = 1;
+    } else if (result == DIR_CCW) {
+      if (stepInterval > 1) {
+        stepInterval = stepInterval/10;  
+      } else stepInterval = 1000000;
+    }
+  } 
+  else if (result == DIR_CW) {
+    baseTune=baseTune+stepInterval;
+  }
+  else if (result == DIR_CCW) {
+    baseTune=baseTune-stepInterval;
+  }
 }
 
