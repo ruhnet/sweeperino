@@ -6,3 +6,5 @@ My fork allows usage of the more modern Si5351 library that can be installed dir
 Also, modifications have been made to use a rotary encoder on pins 2 and 3 for tuning, rather than a potentiometer as in the original design. 
 
 The original circuit details are avaiable on http://hfsignals.blogspot.in
+
+![Sweeperino](sweeperino.jpg)
